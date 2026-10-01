@@ -1,0 +1,64 @@
+name: Build & Sign IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone upstream Jitterbug source
+        run: |
+          git clone --depth 1 https://github.com/osy/Jitterbug.git jitterbug-src
+
+      - name: Create export options (development signing)
+        run: |
+          cat > jitterbug-src/ExportOptions.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>teamID</key>
+              <string>${{ secrets.APPLE_TEAM_ID }}</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Build & archive
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cd jitterbug-src
+          xcodebuild -project Jitterbug.xcodeproj -scheme Jitterbug \
+            -configuration Release \
+            -archivePath build/Jitterbug.xcarchive \
+            -allowProvisioningUpdates \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            archive
+          xcodebuild -exportArchive \
+            -archivePath build/Jitterbug.xcarchive \
+            -exportPath build/ipa \
+            -exportOptionsPlist ExportOptions.plist
+
+      - name: List artifacts
+        run: ls -la jitterbug-src/build/ipa
+
+      - name: Create Release and attach IPA
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build #${{ github.run_number }} (JIT Enabler)
+          files: jitterbug-src/build/ipa/*.ipa
+          generate_release_notes: true
